@@ -48,16 +48,11 @@ class _PropertyMeta(metaclass=ClsInitMeta):
                 ret = copy(self)
                 ret._others = copy(ret._others)
                 if isinstance(other, _PropertyMeta):
-
-                    async def wrap_getter():
-                        return await getattr(other.instance, other.prop._name)
-
-                    ret.foo = op(self.foo, wrap_getter)
-
                     if other not in ret._others:
                         ret._others.append(other)
-                else:
-                    ret.foo = op(self.foo, other)
+
+                ret.foo = op(self.foo, other)
+
                 return ret
 
             setattr(cls, name, wrapper)
@@ -66,7 +61,7 @@ class _PropertyMeta(metaclass=ClsInitMeta):
 
     def __await__(self):
         try:
-            return self.task()
+            return self.foo(getattr(self.instance, f'_{self.prop._name}'))
         except Exception:
             logger.exception(f'awaiting {self.instance}.{self.prop._name}')
             raise RuntimeError()
@@ -182,7 +177,6 @@ class aioproperty:
     def __call__(self, setter):
         self._add_reducer(setter)
         return self
-
 
 
     def __get__(self, instance, owner):
