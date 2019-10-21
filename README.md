@@ -60,8 +60,6 @@ class SomeClass:
 ```
 
 And with our special MetaClass you can effectively inject some new chains in inherited classes:
-By injection we mean 
-
 
 ```python
 class Parent(metaclass=AiopropMeta):

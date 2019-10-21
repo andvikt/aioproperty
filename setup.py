@@ -16,5 +16,6 @@ setup(
     description='truely async properties',
     long_description=desc,
     long_description_content_type='text/markdown',
-    install_requires=['pro_lambda']
+    install_requires=['pro_lambda>=0.3.3'],
+    tests_require=['pytest', 'pytest-asyncio']
 )

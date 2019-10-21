@@ -2,10 +2,11 @@ import typing
 import inspect
 import functools
 import logging
-from contextlib import contextmanager
+from contextlib import contextmanager, asynccontextmanager
 import asyncio
 
 logger = logging.getLogger('aioproperty')
+
 
 def skip_not_needed_kwargs(foo):
     """
@@ -24,7 +25,6 @@ def skip_not_needed_kwargs(foo):
         return foo
     else:
         return wrapper
-
 
 
 @contextmanager
@@ -69,3 +69,56 @@ def deco_log_exception(msg, logger: logging.Logger=None, except_=None, raise_=Tr
             return async_wrapper
 
     return deco
+
+
+def await_if_needed(foo):
+
+    @functools.wraps(foo)
+    async def wrapper(*args, **kwargs):
+        ret = foo(*args, **kwargs)
+        if isinstance(ret, typing.Awaitable):
+            ret = await ret
+        return ret
+
+    return wrapper
+
+
+@deco_log_exception('while any of condition', except_=[asyncio.CancelledError])
+async def any_of_conditions(*conditions: asyncio.Condition):
+    """
+    Combine several conditions in one coroutine. Coroutine blocks untill any of conditions is triggered
+
+    Args:
+        *conditions:
+
+    """
+    assert len(conditions) > 0
+
+    if len(conditions) == 1:
+        new_cond = conditions[0]
+        while True:
+            async with new_cond:
+                yield await new_cond.wait()
+    else:
+        new_cond = asyncio.Condition()
+
+        async def listen(cond: asyncio.Condition):
+            async with cond:
+                await cond.wait()
+            async with new_cond:
+                new_cond.notify_all()
+
+        async def wrap():
+            await asyncio.gather(*[
+                listen(x) for x in conditions
+            ])
+
+        task = asyncio.create_task(wrap())
+
+        try:
+            async with new_cond:
+                while True:
+                    yield await new_cond.wait()
+        finally:
+            task.cancel()
+
