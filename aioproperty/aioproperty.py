@@ -1,19 +1,14 @@
-import functools
 import typing
 import asyncio
 from copy import copy
-from collections import defaultdict
 import warnings
 import inspect
-from contextlib import asynccontextmanager, contextmanager, AbstractAsyncContextManager, AbstractContextManager, AsyncExitStack
-from contextvars import ContextVar, Token
+from contextlib import AbstractAsyncContextManager, AbstractContextManager, AsyncExitStack
 from dataclasses import dataclass, field
-from enum import Enum
 from pro_lambda import pro_lambda
 from pro_lambda.tools import ClsInitMeta, cls_init
 from pro_lambda import consts as pl_consts
 import logging
-from . import consts
 from . import tools
 
 logger = logging.getLogger('aioproperty')
@@ -328,32 +323,6 @@ class aioproperty:
 
     async def _default_setter(self, instance, value):
         return value
-
-    def _check_foo(self, foo):
-        sig = inspect.signature(foo)
-        if not isinstance(foo, typing.Callable):
-            raise TypeError(f'setter must be a callable')
-        if len(sig.parameters) != 2:
-            raise AttributeError(f'setter must have exact 2 arguments: self, value, but got {list(sig.parameters.keys())}')
-        if list(sig.parameters)[0] != 'self':
-            warnings.warn(f'first parameter of setter is usually "self", but got {list(sig.parameters)[0]}')
-
-        if asyncio.iscoroutinefunction(foo):
-            _foo = foo
-        else:
-            async def wrap(self, value):
-                return foo(self, value)
-            _foo = wrap
-
-        async def wrap_return(self, value):
-            """Если функция возвращает None, то заменяем его на value"""
-            ret = await _foo(self, value)
-            if ret is not None:
-                return ret
-            else:
-                return value
-
-        return wrap_return
 
     def chain(self, _foo = None, *, is_first=True, priority=None):
         """
