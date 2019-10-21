@@ -10,9 +10,11 @@ class SomeClass:
     res_test_prop_2 = 0
     res_test_prop_3 = 0
 
-    res_col_1 = []
-    res_col_2 = []
-    res_col_3 = []
+    def __init__(self):
+
+        self.res_col_1 = []
+        self.res_col_2 = []
+        self.res_col_3 = []
 
     @aioproperty(default=0)
     async def test_prop(self, value):
