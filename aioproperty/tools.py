@@ -15,4 +15,3 @@ def await_if_needed(foo):
         return ret
 
     return wrapper
-

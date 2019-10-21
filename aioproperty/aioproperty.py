@@ -3,6 +3,7 @@ import asyncio
 from copy import copy
 import warnings
 import inspect
+from functools import partial
 from contextlib import AbstractAsyncContextManager, AbstractContextManager, AsyncExitStack
 from dataclasses import dataclass, field
 from pro_lambda import pro_lambda
@@ -192,13 +193,22 @@ class aioproperty:
         for _, x in self._reducers:
             yield x
 
-    def __init__(self, setter = None, *, default=None, default_factory=None, format='{0}'):
+    def __init__(
+            self,
+            setter = None,
+            *,
+            default=None,
+            default_factory=None,
+            format='{0}',
+            reducers=None,
+            name=None,
+    ):
 
         self._default = default if default is not None else default_factory() if default_factory is not None else None
         self._owner = None
-        self._name = None
+        self._name = name or None
         self._format = format
-        self._reducers = []
+        self._reducers = reducers or []
         self._context_lck = asyncio.Lock()
         if setter is not None:
             self(setter)
@@ -212,9 +222,8 @@ class aioproperty:
 
             asyncio.create_task(trigger())
 
-
     def __set_name__(self, owner, name):
-        self._name = name
+        self._name = self._name or name
         self._owner = owner
 
     def __copy__(self):
@@ -339,3 +348,38 @@ class aioproperty:
             return foo
 
         return deco(_foo) if _foo is not None else deco
+
+
+class inject:
+
+    def __init__(
+            self,
+            parent_prop: typing.Union[aioproperty, str],
+            *,
+            priority=None,
+            is_first=True,
+    ):
+        """
+        Decorator, decorated foo will be chained to parent's property, but in new class
+        Args:
+            parent_prop: can be aioproperty or string-name of property to chain new foo
+            priority: like in aioproperty.chain
+            is_first: like in aioproperty.chain
+        """
+        if isinstance(parent_prop, aioproperty):
+            self.name = parent_prop._name
+        else:
+            self.name = parent_prop
+        self.foo = None
+        self.priority=priority
+        self.is_first = is_first
+
+    def __call__(self, foo):
+        self.foo = foo
+        return self
+
+    def __set_name__(self, owner, name):
+        _new = copy(getattr(owner, self.name))
+        _new._owner = owner
+        _new.chain(self.foo, priority=self.priority, is_first=self.is_first)
+        setattr(owner, self.name, _new)

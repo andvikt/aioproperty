@@ -1,1 +1,1 @@
-from .aioproperty import aioproperty, async_context, rule
+from .aioproperty import aioproperty, async_context, rule, inject

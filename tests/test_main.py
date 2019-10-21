@@ -1,5 +1,5 @@
 import pytest
-from aioproperty import aioproperty, async_context, rule
+from aioproperty import aioproperty, async_context, rule, inject
 from pytest import fixture
 import asyncio
 
@@ -38,6 +38,22 @@ class SomeClass:
         self.res_col_3.append(value)
 
 
+class SomeInherited(SomeClass):
+
+    def __init__(self):
+        super().__init__()
+        self.recieve_injection = []
+        self.recieve_another_injection = []
+
+    @inject(SomeClass.test_prop)
+    async def add_some_more(self, value):
+        self.recieve_injection.append(value)
+
+    @inject('test_prop')
+    async def add_some_more_2(self, value):
+        self.recieve_another_injection.append(value + 1)
+
+
 @fixture(scope='session')
 def event_loop():
     loop = asyncio.get_event_loop()
@@ -48,7 +64,6 @@ def event_loop():
 @fixture()
 async def some_obj():
     yield SomeClass()
-
 
 @fixture()
 async def waiting_task(some_obj):
@@ -123,3 +138,20 @@ async def test_triggers(waiting_task, waiting_task_2, some_obj):
         some_obj.test_prop = 2
     assert waiting_task == [1, 3, 2]
     assert waiting_task_2 == [1, 3, 6, 5]
+
+
+@fixture()
+async def some_other_obj():
+    yield SomeInherited()
+
+
+@pytest.mark.asyncio
+async def test_inherited(some_other_obj, some_obj):
+    async with async_context:
+        some_obj.test_prop = 1
+        some_other_obj.test_prop = 1
+
+    assert some_obj.res_col_1 == [1]
+    assert some_other_obj.res_col_1 == [1]
+    assert some_other_obj.recieve_injection == [1]
+    assert some_other_obj.recieve_another_injection == [2]
