@@ -8,7 +8,7 @@ setup(
     use_scm_version=True,
     setup_requires=['setuptools_scm'],
     python_requires='>=3.7',
-    packages=['tests'],
+    packages=['tests', 'aioproperty'],
     url='',
     license='MIT',
     author='Viktorov A.G.',
