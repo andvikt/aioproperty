@@ -6,7 +6,7 @@ install:
 - pip3 install -r build_require.txt
 - python3 setup.py install
 env:
-  - CODECOV_TOKEN=6c44aaab-8cca-43e6-b995-4a726fe99550
+  - CODECOV_TOKEN=d412f70b-4ed1-44b0-b4e1-69bca0bc83fe
 script:
 - py.test  --cov-report term --cov=pro_lambda/
 deploy:
