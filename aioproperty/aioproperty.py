@@ -14,6 +14,7 @@ from . import tools
 
 logger = logging.getLogger('aioproperty')
 _trigger_type = typing.Union[asyncio.Condition, typing.Callable[[], typing.Awaitable]]
+pT = typing.TypeVar('pT')
 
 
 class _ContextCounter(AbstractContextManager):
@@ -79,7 +80,7 @@ async_context = _PropContext()
 
 
 @dataclass
-class _PropertyMeta(metaclass=ClsInitMeta):
+class _PropertyMeta(typing.Generic[pT], metaclass=ClsInitMeta):
     """
     Captures task from aioproperty. When awaited, return it's result.
     It also captures getter from aioproperty and one can call it using next()
@@ -93,7 +94,7 @@ class _PropertyMeta(metaclass=ClsInitMeta):
         task: pro_lambda, must return Task
         getter: pro_lambda, must return new _PropertyMeta
     """
-    prop: 'aioproperty'
+    prop: typing.Union[pT, 'aioproperty']
     instance: object
     foo: pro_lambda = field(default=pro_lambda(lambda x: x), init=False)
     _others: typing.List['aioproperty'] = field(default_factory=list, init=False)
