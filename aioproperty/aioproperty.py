@@ -199,18 +199,18 @@ class aioproperty:
             *,
             default=None,
             default_factory=None,
-            format='{0}',
             reducers=None,
             name=None,
+            prop_meta_cls: typing.Type[_PropertyMeta]=_PropertyMeta,
     ):
 
         self._default = default if default is not None else default_factory() if default_factory is not None else None
         self._owner = None
         self._name = name or None
-        self._format = format
         self._reducers = reducers or []
         self._context_lck = asyncio.Lock()
         self._root = self
+        self._prop_meta_cls = prop_meta_cls
         if setter is not None:
             self(setter)
 
@@ -251,7 +251,7 @@ class aioproperty:
                 ret = asyncio.Future()
                 ret.set_result(self._default)
                 setattr(instance, f'_{self._name}', ret)
-            ret = _PropertyMeta(
+            ret = self._prop_meta_cls(
                 prop=self,
                 instance=instance,
             )
