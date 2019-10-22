@@ -155,3 +155,4 @@ async def test_inherited(some_other_obj, some_obj):
     assert some_other_obj.res_col_1 == [1]
     assert some_other_obj.recieve_injection == [1]
     assert some_other_obj.recieve_another_injection == [2]
+    assert SomeInherited.test_prop == SomeClass.test_prop

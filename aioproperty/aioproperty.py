@@ -210,6 +210,7 @@ class aioproperty:
         self._format = format
         self._reducers = reducers or []
         self._context_lck = asyncio.Lock()
+        self._root = self
         if setter is not None:
             self(setter)
 
@@ -225,6 +226,10 @@ class aioproperty:
     def __set_name__(self, owner, name):
         self._name = self._name or name
         self._owner = owner
+
+    def __eq__(self, other):
+        if isinstance(other, aioproperty):
+            return other._root is self._root
 
     def __copy__(self):
         newone = type(self)()
@@ -361,10 +366,15 @@ class inject:
     ):
         """
         Decorator, decorated foo will be chained to parent's property, but in new class
+
         Args:
             parent_prop: can be aioproperty or string-name of property to chain new foo
             priority: like in aioproperty.chain
             is_first: like in aioproperty.chain
+
+        Notes:
+            after decoration, prop becomes actually a copy of a previous prop. So you can not
+            `prop1 is prop2 == False`, if you need subclass-comparing you can use `prop1 == prop2`
         """
         if isinstance(parent_prop, aioproperty):
             self.name = parent_prop._name
