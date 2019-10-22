@@ -110,9 +110,10 @@ class _PropertyMeta(typing.Generic[pT], metaclass=ClsInitMeta):
                 if isinstance(other, _PropertyMeta):
                     if other not in ret._others:
                         ret._others.append(other)
-
-                ret.foo = op(self.foo, other)
-
+                if name != '__invert__':
+                    ret.foo = op(self.foo, other)
+                else:
+                    ret.foo = ~self.foo
                 return ret
 
             setattr(cls, name, wrapper)
