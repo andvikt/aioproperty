@@ -138,7 +138,7 @@ class _PropertyMeta(metaclass=ClsInitMeta):
         _wrapper = tools.await_if_needed(self.foo)
 
         async def wrap(prop, value):
-            if prop is self.prop:
+            if prop == self.prop:
                 await foo(await _wrapper(value))
             else:
                 await foo(await self)
