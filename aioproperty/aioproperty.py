@@ -72,7 +72,6 @@ class _PropContext(AbstractAsyncContextManager):
             except ValueError:
                 pass
 
-
     def acquire(self) -> _ContextCounter:
         """
         Get current _ContextCounter and acquires it
@@ -131,6 +130,10 @@ class _PropertyMeta(typing.Generic[pT], metaclass=ClsInitMeta):
             setattr(cls, name, wrapper)
 
         list(map(set_foo, pl_consts.ops))
+
+    @property
+    def context(self) -> _ContextCounter:
+        return getattr(self.instance, '_aiop_context')
 
     def __await__(self):
         try:
@@ -231,7 +234,8 @@ class aioproperty:
         @self.chain(priority=-1000)
         async def _process_callbacks(instance, value):
             callbacks = self.get_callbacks(instance)
-            context = async_context.acquire()
+            context: _ContextCounter = getattr(instance, '_aiop_context')
+            context.acquire()
 
             async def trigger():
                 try:
@@ -335,6 +339,7 @@ class aioproperty:
             prev_task.set_result(self._default)
 
         _context = async_context.acquire()
+        setattr(instance, '_aiop_context', _context)
 
         async def wrap():
             prev_value = await prev_task
