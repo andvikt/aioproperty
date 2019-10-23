@@ -22,7 +22,7 @@ copyright = '2019, Viktorov A.G.'
 author = 'Viktorov A.G.'
 
 # The full version, including alpha/beta/rc tags
-release = '0.2.7'
+release = '0.2.8'
 master_doc = 'index'
 
 # -- General configuration ---------------------------------------------------
