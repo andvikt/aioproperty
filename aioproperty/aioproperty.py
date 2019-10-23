@@ -219,9 +219,13 @@ class aioproperty:
         @self.chain(priority=-1000)
         async def _process_callbacks(instance, value):
             callbacks = self.get_callbacks(instance)
+            context = async_context.acquire()
 
             async def trigger():
-                await asyncio.gather(*[x(self, value) for x in callbacks])
+                try:
+                    await asyncio.gather(*[x(self, value) for x in callbacks])
+                finally:
+                    context.release()
 
             asyncio.create_task(trigger())
 
