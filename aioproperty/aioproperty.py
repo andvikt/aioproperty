@@ -51,15 +51,27 @@ class _PropContext(AbstractAsyncContextManager):
     """
     def __init__(self):
         self._contexts: typing.List[_ContextCounter] = list()
+        self.lck = asyncio.Lock()
 
     async def __aenter__(self):
         _context = _ContextCounter()
-        self._contexts.append(_context)
+        async with self.lck:
+            self._contexts.append(_context)
         return _context
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        context = self._contexts.pop()
+        async with self.lck:
+            try:
+                context = self._contexts[-1]
+            except IndexError:
+                return
         await context
+        async with self.lck:
+            try:
+                self._contexts.remove(context)
+            except ValueError:
+                pass
+
 
     def acquire(self) -> _ContextCounter:
         """

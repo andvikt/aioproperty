@@ -65,6 +65,7 @@ def event_loop():
 async def some_obj():
     yield SomeClass()
 
+
 @fixture()
 async def waiting_task(some_obj):
     collection = []
@@ -156,3 +157,21 @@ async def test_inherited(some_other_obj, some_obj):
     assert some_other_obj.recieve_injection == [1]
     assert some_other_obj.recieve_another_injection == [2]
     assert SomeInherited.test_prop == SomeClass.test_prop
+
+
+@pytest.mark.asyncio
+async def test_callback(some_other_obj):
+    some_list = []
+    @some_other_obj.test_prop.add_callback
+    async def some_foo(value):
+        some_list.append(value)
+
+    async with async_context:
+        some_other_obj.test_prop = 1
+
+    assert some_list == [1]
+
+    some_other_obj.test_prop = 2
+    assert some_list == [1]
+    await asyncio.sleep(0.1)
+    assert some_list == [1, 2]
