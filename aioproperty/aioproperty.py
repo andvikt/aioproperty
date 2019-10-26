@@ -1,26 +1,98 @@
-import functools
 import typing
 import asyncio
 from copy import copy
-from collections import defaultdict
 import warnings
 import inspect
-from contextlib import asynccontextmanager, contextmanager
+import functools
+from contextlib import AbstractAsyncContextManager, AbstractContextManager, AsyncExitStack
 from dataclasses import dataclass, field
-from enum import Enum
 from pro_lambda import pro_lambda
 from pro_lambda.tools import ClsInitMeta, cls_init
 from pro_lambda import consts as pl_consts
 import logging
-from . import consts
+import abc
+from . import tools
 
 logger = logging.getLogger('aioproperty')
-_prop_context = []
 _trigger_type = typing.Union[asyncio.Condition, typing.Callable[[], typing.Awaitable]]
+pT = typing.TypeVar('pT')
+_dummy = object()
+
+class _ContextCounter(AbstractContextManager):
+
+    def __init__(self):
+        self._count = 0
+        self._trigger = asyncio.Event()
+        self._trigger.set()
+
+    def acquire(self):
+        self._count += 1
+        if self._trigger.is_set():
+            self._trigger.clear()
+
+    def release(self):
+        self._count -= 1
+        if self._count == 0:
+            self._trigger.set()
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.release()
+
+    def __await__(self):
+        return (self._trigger.wait()).__await__()
+
+
+class _PropContext(AbstractAsyncContextManager):
+    """
+    Special context-manager. Everytime someone enters
+    """
+    def __init__(self):
+        self._contexts: typing.List[_ContextCounter] = list()
+        self.lck = asyncio.Lock()
+
+    async def __aenter__(self):
+        _context = _ContextCounter()
+        async with self.lck:
+            self._contexts.append(_context)
+        return _context
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        async with self.lck:
+            try:
+                context = self._contexts[-1]
+            except IndexError:
+                return
+        await context
+        async with self.lck:
+            try:
+                self._contexts.remove(context)
+            except ValueError:
+                pass
+
+    def acquire(self) -> _ContextCounter:
+        """
+        Get current _ContextCounter and acquires it
+
+        Returns: _ContextCounter
+
+        """
+        try:
+            context = self._contexts[-1]
+        except IndexError:
+            context = _ContextCounter()
+        context.acquire()
+        return context
+
+
+async_context = _PropContext()
 
 
 @dataclass
-class _PropertyMeta(metaclass=ClsInitMeta):
+class _PropertyMeta(typing.Generic[pT], metaclass=ClsInitMeta):
     """
     Captures task from aioproperty. When awaited, return it's result.
     It also captures getter from aioproperty and one can call it using next()
@@ -34,7 +106,7 @@ class _PropertyMeta(metaclass=ClsInitMeta):
         task: pro_lambda, must return Task
         getter: pro_lambda, must return new _PropertyMeta
     """
-    prop: 'aioproperty'
+    prop: typing.Union[pT, 'aioproperty']
     instance: object
     foo: pro_lambda = field(default=pro_lambda(lambda x: x), init=False)
     _others: typing.List['aioproperty'] = field(default_factory=list, init=False)
@@ -50,70 +122,55 @@ class _PropertyMeta(metaclass=ClsInitMeta):
                 if isinstance(other, _PropertyMeta):
                     if other not in ret._others:
                         ret._others.append(other)
-
-                ret.foo = op(self.foo, other)
-
+                if name != '__invert__':
+                    ret.foo = op(self.foo, other)
+                else:
+                    ret.foo = ~self.foo
                 return ret
 
             setattr(cls, name, wrapper)
 
         list(map(set_foo, pl_consts.ops))
 
+    @property
+    def context(self) -> _ContextCounter:
+        return getattr(self.instance, '_aiop_context')
+
     def __await__(self):
         try:
-            return self.foo(getattr(self.instance, f'_{self.prop._name}'))
+            async def wrap():
+                ret = getattr(self.instance, f'_{self.prop._name}', self.prop._default)
+                if isinstance(ret, typing.Awaitable):
+                    ret = await ret
+                if self.foo.is_async:
+                    return await self.foo(ret)
+                else:
+                    return self.foo(ret)
+            return wrap().__await__()
         except Exception:
             logger.exception(f'awaiting {self.instance}.{self.prop._name}')
             raise RuntimeError()
 
-    async def wrap_next(self, _res: asyncio.Future, others: typing.Dict['_PropertyMeta', asyncio.Task]):
-        try:
-            _next = await self.prop.get_next(self.instance)
-            _res.set_result(await _next)
-            for x, y in others.items():
-                if x is not self:
-                    y.cancel()
-        except asyncio.CancelledError:
-            pass
+    def add_callback(self, foo):
+        foo = tools.await_if_needed(foo)
+        _wrapper = tools.await_if_needed(self.foo)
 
-    def __next__(self):
-        try:
-            _res = asyncio.Future()
-            _tasks = {}
-            for x in [self, *self._others]:
-                _tasks[x] = asyncio.create_task(x.wrap_next(_res, _tasks))
-            return _res
-        except Exception:
-            logger.exception(f'getting next value of {self.instance}.{self.prop._name}')
-            raise RuntimeError()
+        async def wrap(prop, value):
+            if prop == self.prop:
+                await foo(await _wrapper(value))
+            else:
+                await foo(await self)
+
+        for x in [self, *self._others]:
+            x.prop.add_callback(x.instance, wrap)
+        return foo
 
 
-@asynccontextmanager
-async def prop_context():
-    """
-    It is a special async context manager that helps to bring async awaiting on aioproperty setattr()
-
-    We can await on async attr setting both two ways:
-
-    >>> some_obj.is_on = True
-    >>> another_obj.is_on = False
-    >>> await some_obj.is_on
-    >>> await another_obj.is_on
-
-    Or:
-
-    >>> async with prop_context():
-    ...     some_obj.is_on = True
-    ...     another_obj.is_on = False
-
-    With this context manager we get the same result: it will not go outside context until all inner objects finishes
-    their async setters, but it is fewer lines of code and more readable.
-
-    """
-    yield
-    context = _prop_context.copy()
-    if context:
-        await asyncio.gather(*context)
+def rule(prop: _PropertyMeta):
+    def deco(foo):
+        prop.add_callback(foo)
+        return foo
+    return deco
 
 
 class aioproperty:
@@ -154,19 +211,51 @@ class aioproperty:
         for _, x in self._reducers:
             yield x
 
-    def __init__(self, setter = None, *, default=None, default_factory=None, format='{0}'):
+    def __init__(
+            self,
+            setter = None,
+            *,
+            default=None,
+            default_factory=None,
+            reducers=None,
+            name=None,
+            priority=None,
+            prop_meta_cls: typing.Type[_PropertyMeta]=_PropertyMeta,
+    ):
 
-        self._default = default or default_factory
+        self._default = default if default is not None else default_factory() if default_factory is not None else None
         self._owner = None
-        self._name = None
-        self._format = format
-        self._reducers = []
+        self._name = name or None
+        self._reducers = reducers or []
+        self._context_lck = asyncio.Lock()
+        self._root = self
+        self._prop_meta_cls = prop_meta_cls
+        self._default_priority = priority
         if setter is not None:
             self(setter)
 
+        @self.chain(priority=-1000)
+        @tools.mark(id=f'{self._name}_pc')
+        async def _process_callbacks(instance, value):
+            callbacks = self.get_callbacks(instance)
+            context: _ContextCounter = getattr(instance, '_aiop_context')
+            context.acquire()
+
+            async def trigger():
+                try:
+                    await asyncio.gather(*[x(self, value) for x in callbacks])
+                finally:
+                    context.release()
+
+            asyncio.create_task(trigger())
+
     def __set_name__(self, owner, name):
-        self._name = name
+        self._name = self._name or name
         self._owner = owner
+
+    def __eq__(self, other):
+        if isinstance(other, aioproperty):
+            return other._root is self._root
 
     def __copy__(self):
         newone = type(self)()
@@ -175,22 +264,20 @@ class aioproperty:
         return newone
 
     def __call__(self, setter):
-        self._add_reducer(setter)
+        self._add_reducer(setter, priority=self._default_priority)
         return self
-
 
     def __get__(self, instance, owner):
         if instance is None:
             return self
         else:
             try:
-                ret = getattr(instance, f'_{self._name}')
+                getattr(instance, f'_{self._name}')
             except AttributeError:
                 ret = asyncio.Future()
                 ret.set_result(self._default)
-            ret = _PropertyMeta(
-                task=pro_lambda(lambda: ret),
-                getter=pro_lambda(lambda: getattr(instance, self._name)),
+                setattr(instance, f'_{self._name}', ret)
+            ret = self._prop_meta_cls(
                 prop=self,
                 instance=instance,
             )
@@ -205,7 +292,8 @@ class aioproperty:
             raise RuntimeError(f'reducer {self}.{reducer} has wrong parameters: {sig.parameters}, must '
                                f'have "self, value" or just "value"')
 
-        @await_if_needed
+        @tools.await_if_needed
+        @functools.wraps(reducer)
         def wrap_reducer(instance=None, value=None):
             if len(sig.parameters) == 1:
                 return reducer(value)
@@ -213,10 +301,14 @@ class aioproperty:
                 return reducer(instance, value)
 
         if priority is None:
-            if last:
-                priority = max([x[0] for x in self._reducers]) + 1
+            if self._reducers:
+                if last:
+                    priority = max([x[0] for x in self._reducers]) + 1
+                else:
+                    priority = min([x[0] for x in self._reducers]) - 1
             else:
-                priority = min([x[0] for x in self._reducers]) - 1
+                priority = 0
+
         wrap_reducer.__name__ = reducer.__name__
         self._reducers.append((priority, wrap_reducer))
         self._reducers.sort(key=lambda x: x[0])
@@ -232,30 +324,17 @@ class aioproperty:
             value = await reducer(instance, value) or value
         return value
 
-    def get_next(self, instance) -> asyncio.Future:
-        """
-        Returns Future that can be awaited for informing about property is changed
-
-        Args:
-            instance: instance of object, that property belongs to
-        """
+    def get_callbacks(self, instance) -> typing.List[typing.Callable]:
         try:
-            _next = getattr(instance, f'_next_{self._name}')
+            _trig = getattr(instance, f'_t_{self._name}')
         except AttributeError:
-            _next = asyncio.Future()
-            setattr(instance, f'_next_{self._name}', _next)
-        return _next
+            _trig = []
+            setattr(instance, f'_t_{self._name}', _trig)
+        return _trig
 
-    @contextmanager
-    def _next_context(self, instance) -> asyncio.Future:
-        _next = self.get_next(instance)
-        try:
-            yield _next
-        finally:
-            if not _next.done():
-                _next.set_result(getattr(instance, self._name))
-            _next = asyncio.Future()
-            setattr(instance, f'_next_{self._name}', _next)
+    def add_callback(self, instance, callback: typing.Callable):
+        callbacks = self.get_callbacks(instance)
+        callbacks.append(callback)
 
     def __set__(self, instance, value):
         try:
@@ -264,12 +343,11 @@ class aioproperty:
             prev_task = asyncio.Future()
             prev_task.set_result(self._default)
 
-        _context = asyncio.Future()
-        _prop_context.append(_context)
+        _context = async_context.acquire()
+        setattr(instance, '_aiop_context', _context)
 
         async def wrap():
-            with self._next_context(instance) as _next:
-                prev_value = await prev_task
+            prev_value = await prev_task
             try:
                 if value != prev_value:
                     logger.debug(f'set {instance}.{self._name}={value}')
@@ -281,40 +359,12 @@ class aioproperty:
                 else:
                     return value
             finally:
-                if not _context.done():
-                    _context.set_result(True)
-                    _prop_context.remove(_context)
+                _context.release()
 
         setattr(instance, f'_{self._name}', asyncio.create_task(wrap()))
 
     async def _default_setter(self, instance, value):
         return value
-
-    def _check_foo(self, foo):
-        sig = inspect.signature(foo)
-        if not isinstance(foo, typing.Callable):
-            raise TypeError(f'setter must be a callable')
-        if len(sig.parameters) != 2:
-            raise AttributeError(f'setter must have exact 2 arguments: self, value, but got {list(sig.parameters.keys())}')
-        if list(sig.parameters)[0] != 'self':
-            warnings.warn(f'first parameter of setter is usually "self", but got {list(sig.parameters)[0]}')
-
-        if asyncio.iscoroutinefunction(foo):
-            _foo = foo
-        else:
-            async def wrap(self, value):
-                return foo(self, value)
-            _foo = wrap
-
-        async def wrap_return(self, value):
-            """Если функция возвращает None, то заменяем его на value"""
-            ret = await _foo(self, value)
-            if ret is not None:
-                return ret
-            else:
-                return value
-
-        return wrap_return
 
     def chain(self, _foo = None, *, is_first=True, priority=None):
         """
@@ -331,3 +381,66 @@ class aioproperty:
             return foo
 
         return deco(_foo) if _foo is not None else deco
+
+
+class inject:
+
+    def __init__(
+            self,
+            parent_prop: typing.Union[aioproperty, str],
+            *,
+            priority=None,
+            is_first=True,
+    ):
+        """
+        Decorator, decorated foo will be chained to parent's property, but in new class
+
+        Args:
+            parent_prop: can be aioproperty or string-name of property to chain new foo
+            priority: like in aioproperty.chain
+            is_first: like in aioproperty.chain
+
+        Notes:
+            after decoration, prop becomes actually a copy of a previous prop. So you can not
+            `prop1 is prop2 == False`, if you need subclass-comparing you can use `prop1 == prop2`
+        """
+        if isinstance(parent_prop, aioproperty):
+            self.name = parent_prop._name
+        else:
+            self.name = parent_prop
+        self.foo = None
+        self.priority=priority
+        self.is_first = is_first
+
+    def __call__(self, foo):
+        self.foo = foo
+        return self
+
+    def __set_name__(self, owner, name):
+        _new = copy(getattr(owner, self.name))
+        _new._owner = owner
+        _new.chain(self.foo, priority=self.priority, is_first=self.is_first)
+        setattr(owner, self.name, _new)
+
+
+
+class _CombineMeta(abc.ABCMeta):
+
+    def __new__(mcls, name, bases, namespace: dict, **kwargs):
+        states: typing.Dict[str, aioproperty] = {x: y for x, y in namespace.items() if isinstance(y, aioproperty)}
+        for x in bases:
+            for n, y in x.__dict__.items():
+                if isinstance(y, aioproperty):
+                    try:
+                        s = states[n].__copy__()
+                        s._reducers = tools._merge_reducers(s._reducers, y._reducers)
+                    except KeyError:
+                        s = y.__copy__()
+                    states[n] = s
+        namespace.update(states)
+        cls = super().__new__(mcls, name, bases, namespace, **kwargs)
+        return cls
+
+
+class MergeAioproperties(metaclass=_CombineMeta):
+    pass

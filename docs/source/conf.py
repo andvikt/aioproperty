@@ -22,7 +22,7 @@ copyright = '2019, Viktorov A.G.'
 author = 'Viktorov A.G.'
 
 # The full version, including alpha/beta/rc tags
-release = '0.1.0'
+release = '0.3.0'
 master_doc = 'index'
 
 # -- General configuration ---------------------------------------------------
@@ -35,6 +35,7 @@ extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.coverage',
     'sphinx.ext.napoleon',
+    'm2r'
 ]
 
 # Add any paths that contain templates here, relative to this directory.

@@ -8,7 +8,7 @@ setup(
     use_scm_version=True,
     setup_requires=['setuptools_scm'],
     python_requires='>=3.7',
-    packages=['tests'],
+    packages=['aioproperty'],
     url='',
     license='MIT',
     author='Viktorov A.G.',
@@ -16,5 +16,6 @@ setup(
     description='truely async properties',
     long_description=desc,
     long_description_content_type='text/markdown',
-    install_requires=['pro_lambda']
+    install_requires=['pro_lambda>=0.3.3'],
+    tests_require=['pytest', 'pytest-asyncio']
 )

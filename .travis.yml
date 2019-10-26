@@ -1,0 +1,20 @@
+language: python
+python:
+- '3.7'
+install:
+- pip3 install -r test_require.txt
+- pip3 install -r build_require.txt
+- python3 setup.py install
+env:
+- CODECOV_TOKEN=d412f70b-4ed1-44b0-b4e1-69bca0bc83fe
+script:
+- py.test  --cov-report term --cov=pro_lambda/
+deploy:
+  provider: pypi
+  user: __token__
+  password:
+    secure: sZbqgNaUVnXTSUe6bvdrejsJH4N8kRweZOIVhnowllYfRtGi1j/tnxw0WTXcpuvs0CDYowJBsMEbAr23MDruDLwJEGA8ka/SbJmB3bb4alT0VwY4BrRxQpAISBaT/0TjDdnGzJzBw/9f/4RP0HVeEXXMAeU+t8QgCOdAC6nV8yL1yx369rAvGbuIMSqtSZ2yvfWkPG5s0FHVbQZ0YtEHGLicG5PyHNK0sGGNcaoZsJrFoXa0HkP9wBLzg4qQwAkpSoKrPIf6WBYmvoeFklJQtlWoK+Da15K8qWWteydgNTQXoluS1uSlU9Ir5k1kOx09NqID7DArd1d2SyqQegzq+e+TiQO9nKbvey8cHcchRKy/t8w8hUVSHkggo2LyiNF3D9cyaRCurJ8PGw83y4UsGBxh5ppHchZNPq41yqj1N5Eh7l1Y30LoJUAjxdvi7e85ewBM7SL7RIElIAU1zvFVQNXRVelwA00lYWcb92vEVGLQ1jI6ufTgA2BHXkXDWMN2i4wvSks2+H6KSTT9dWFeZ/Z81JgQJ9gzwZ1NFm9u3V8cH0N4AwIxJVfil6bYebaDfJbnyroRxpU8+1JngMVljnghU/fkXWe4VKjdKg2kpCaQs+HTIOfLfpn5SI8H3ukqfEiOIWhfuwKLfIAXESUFuzDBdCi5Z7Y2Tyvo9R5rgEo=
+  on:
+    tags: true
+after_success:
+    - codecov
