@@ -423,7 +423,6 @@ class inject:
         setattr(owner, self.name, _new)
 
 
-
 class _CombineMeta(abc.ABCMeta):
 
     def __new__(mcls, name, bases, namespace: dict, **kwargs):

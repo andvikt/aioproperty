@@ -1,4 +1,4 @@
-from .aioproperty import aioproperty, async_context, rule, inject, MergeAioproperties
+from .aioproperty import aioproperty, async_context, rule, inject, MergeAioproperties, _CombineMeta
 
 from pkg_resources import get_distribution, DistributionNotFound
 try:
