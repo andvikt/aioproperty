@@ -1,5 +1,5 @@
 import pytest
-from aioproperty import aioproperty, async_context, rule, inject
+from aioproperty import aioproperty, async_context, rule, inject, MergeAioproperties
 from pytest import fixture
 import asyncio
 
@@ -22,7 +22,7 @@ class SomeClass:
         self.res_col_1.append(value)
 
     @test_prop.chain
-    async def some_hook(self, value):
+    def some_hook(self, value):
         print('hook1', value)
         self.res_test_prop = value
 
@@ -175,3 +175,50 @@ async def test_callback(some_other_obj):
     assert some_list == [1]
     await asyncio.sleep(0.1)
     assert some_list == [1, 2]
+
+
+class SomeTest1(MergeAioproperties):
+
+    @aioproperty
+    def is_on(self, value):
+        return value
+
+
+class SomeTest2(MergeAioproperties):
+
+    @aioproperty(priority=10)
+    def is_on(self, value):
+        return value * 2
+
+
+class Combined(SomeTest1, SomeTest2):
+    pass
+
+
+class MoreCombo(Combined):
+
+    @aioproperty
+    def is_on(self, value):
+        return value * 2
+
+
+@fixture
+async def combined_obj(event_loop):
+    yield Combined()
+
+
+@fixture
+async def morecombo_obj(event_loop):
+    yield MoreCombo()
+
+
+@pytest.mark.asyncio
+async def test_combined(combined_obj, morecombo_obj):
+    async with async_context:
+        combined_obj.is_on = 2
+        morecombo_obj.is_on = 2
+
+    assert await combined_obj.is_on == 4
+    assert await morecombo_obj.is_on == 8
+    assert len(Combined.is_on._reducers) == 3
+    assert len(MoreCombo.is_on._reducers) == 4

@@ -3,19 +3,20 @@ import asyncio
 from copy import copy
 import warnings
 import inspect
-from functools import partial
+import functools
 from contextlib import AbstractAsyncContextManager, AbstractContextManager, AsyncExitStack
 from dataclasses import dataclass, field
 from pro_lambda import pro_lambda
 from pro_lambda.tools import ClsInitMeta, cls_init
 from pro_lambda import consts as pl_consts
 import logging
+import abc
 from . import tools
 
 logger = logging.getLogger('aioproperty')
 _trigger_type = typing.Union[asyncio.Condition, typing.Callable[[], typing.Awaitable]]
 pT = typing.TypeVar('pT')
-
+_dummy = object()
 
 class _ContextCounter(AbstractContextManager):
 
@@ -218,6 +219,7 @@ class aioproperty:
             default_factory=None,
             reducers=None,
             name=None,
+            priority=None,
             prop_meta_cls: typing.Type[_PropertyMeta]=_PropertyMeta,
     ):
 
@@ -228,10 +230,12 @@ class aioproperty:
         self._context_lck = asyncio.Lock()
         self._root = self
         self._prop_meta_cls = prop_meta_cls
+        self._default_priority = priority
         if setter is not None:
             self(setter)
 
         @self.chain(priority=-1000)
+        @tools.mark(id=f'{self._name}_pc')
         async def _process_callbacks(instance, value):
             callbacks = self.get_callbacks(instance)
             context: _ContextCounter = getattr(instance, '_aiop_context')
@@ -260,7 +264,7 @@ class aioproperty:
         return newone
 
     def __call__(self, setter):
-        self._add_reducer(setter)
+        self._add_reducer(setter, priority=self._default_priority)
         return self
 
     def __get__(self, instance, owner):
@@ -289,6 +293,7 @@ class aioproperty:
                                f'have "self, value" or just "value"')
 
         @tools.await_if_needed
+        @functools.wraps(reducer)
         def wrap_reducer(instance=None, value=None):
             if len(sig.parameters) == 1:
                 return reducer(value)
@@ -416,3 +421,26 @@ class inject:
         _new._owner = owner
         _new.chain(self.foo, priority=self.priority, is_first=self.is_first)
         setattr(owner, self.name, _new)
+
+
+
+class _CombineMeta(abc.ABCMeta):
+
+    def __new__(mcls, name, bases, namespace: dict, **kwargs):
+        states: typing.Dict[str, aioproperty] = {x: y for x, y in namespace.items() if isinstance(y, aioproperty)}
+        for x in bases:
+            for n, y in x.__dict__.items():
+                if isinstance(y, aioproperty):
+                    try:
+                        s = states[n].__copy__()
+                        s._reducers = tools._merge_reducers(s._reducers, y._reducers)
+                    except KeyError:
+                        s = y.__copy__()
+                    states[n] = s
+        namespace.update(states)
+        cls = super().__new__(mcls, name, bases, namespace, **kwargs)
+        return cls
+
+
+class MergeAioproperties(metaclass=_CombineMeta):
+    pass
