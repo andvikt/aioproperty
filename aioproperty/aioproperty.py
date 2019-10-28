@@ -18,6 +18,7 @@ _trigger_type = typing.Union[asyncio.Condition, typing.Callable[[], typing.Await
 pT = typing.TypeVar('pT')
 _dummy = object()
 
+
 class _ContextCounter(AbstractContextManager):
 
     def __init__(self):
@@ -423,7 +424,11 @@ class inject:
         setattr(owner, self.name, _new)
 
 
-class _CombineMeta(abc.ABCMeta):
+class CombineMeta(ClsInitMeta):
+
+    """
+    Metaclass for merging reducers of inhereted classes. It also Inherits pro_lambda's ClsInitMeta
+    """
 
     def __new__(mcls, name, bases, namespace: dict, **kwargs):
         states: typing.Dict[str, aioproperty] = {x: y for x, y in namespace.items() if isinstance(y, aioproperty)}
@@ -441,5 +446,5 @@ class _CombineMeta(abc.ABCMeta):
         return cls
 
 
-class MergeAioproperties(metaclass=_CombineMeta):
+class MergeAioproperties(metaclass=CombineMeta):
     pass
